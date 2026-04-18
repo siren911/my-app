@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>상담실 예약 관리자</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.8/dist/web/static/pretendard.css');
+        body { font-family: 'Pretendard', sans-serif; background-color: #f3f4f6; }
+        .tab-active { background-color: #2563eb !important; color: white !important; }
+        .room1-bg { background-color: #dbeafe; border-left: 3px solid #2563eb; }
+        .room2-bg { background-color: #dcfce7; border-left: 3px solid #16a34a; }
+        .room3-bg { background-color: #fed7aa; border-left: 3px solid #ea580c; }
+        .calendar-day { min-height: 80px; }
+        @media (max-width: 640px) {
+            .calendar-day { min-height: 60px; font-size: 11px; }
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+
+    <!-- ============================================================
+         🔐 비밀번호 입력 화면
+         ============================================================ -->
+    <div id="loginScreen" class="min-h-screen flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-sm">
+            <div class="text-center mb-6">
+                <div class="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4">
+                    <svg class="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                </div>
+                <h1 class="text-xl font-black text-gray-800">관리자 인증</h1>
+                <p class="text-sm text-gray-500 mt-1">4자리 PIN을 입력하세요</p>
+            </div>
+            <input type="password" id="pinInput" maxlength="4" placeholder="••••" 
+                   class="w-full p-4 text-center text-2xl tracking-widest bg-gray-50 rounded-2xl border-none outline-none focus:ring-2 focus:ring-blue-500 font-bold">
+            <button id="loginBtn" class="w-full mt-4 bg-blue-600 text-white font-black py-4 rounded-2xl hover:bg-blue-700 active:scale-95 transition">
+                로그인
+            </button>
+            <p id="loginError" class="text-center text-red-500 text-xs mt-2 hidden">잘못된 비밀번호입니다</p>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         📊 관리자 메인 화면
+         ============================================================ -->
+    <div id="adminScreen" class="hidden">
+        <!-- 헤더 -->
+        <header class="bg-blue-600 text-white p-4 shadow-lg sticky top-0 z-10">
+            <div class="max-w-6xl mx-auto flex justify-between items-center">
+                <div>
+                    <h1 class="text-lg sm:text-xl font-black">📊 상담실 예약 관리</h1>
+                    <p class="text-blue-100 text-[10px] uppercase tracking-widest mt-0.5">Admin Dashboard</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span id="connStatus" class="text-[10px] bg-green-500 px-2 py-1 rounded-full font-bold">●LIVE</span>
+                    <button id="logoutBtn" class="text-xs bg-blue-700 hover:bg-blue-800 px-3 py-1.5 rounded-lg font-bold">로그아웃</button>
+                </div>
+            </div>
+        </header>
+
+        <div class="max-w-6xl mx-auto p-4 space-y-4">
+
+            <!-- 요약 카드 -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div class="bg-white p-4 rounded-2xl shadow-sm">
+                    <p class="text-[10px] text-gray-400 font-bold uppercase">총 예약</p>
+                    <p id="totalCount" class="text-2xl font-black text-gray-800 mt-1">-</p>
+                </div>
+                <div class="bg-blue-50 p-4 rounded-2xl shadow-sm">
+                    <p class="text-[10px] text-blue-600 font-bold uppercase">1번실</p>
+                    <p id="room1Count" class="text-2xl font-black text-blue-700 mt-1">-</p>
+                </div>
+                <div class="bg-green-50 p-4 rounded-2xl shadow-sm">
+                    <p class="text-[10px] text-green-600 font-bold uppercase">2번실</p>
+                    <p id="room2Count" class="text-2xl font-black text-green-700 mt-1">-</p>
+                </div>
+                <div class="bg-orange-50 p-4 rounded-2xl shadow-sm">
+                    <p class="text-[10px] text-orange-600 font-bold uppercase">3번실</p>
+                    <p id="room3Count" class="text-2xl font-black text-orange-700 mt-1">-</p>
+                </div>
+            </div>
+
+            <!-- 컨트롤 -->
+            <div class="bg-white p-4 rounded-2xl shadow-sm space-y-3">
+                <!-- 검색 -->
+                <div class="flex gap-2">
+                    <input type="text" id="searchInput" placeholder="🔍 상담사 이름으로 검색..." 
+                           class="flex-1 p-3 bg-gray-50 rounded-xl border-none outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                    <button id="excelBtn" class="bg-green-600 hover:bg-green-700 text-white font-bold px-4 py-3 rounded-xl text-sm whitespace-nowrap">
+                        📥 엑셀
+                    </button>
+                    <button id="refreshBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold px-4 py-3 rounded-xl text-sm">
+                        🔄
+                    </button>
+                </div>
+
+                <!-- 탭 -->
+                <div class="flex gap-2 flex-wrap">
+                    <button data-tab="list" class="tab-btn tab-active px-4 py-2 rounded-xl text-xs font-bold bg-gray-100 text-gray-600">📋 목록</button>
+                    <button data-tab="calendar" class="tab-btn px-4 py-2 rounded-xl text-xs font-bold bg-gray-100 text-gray-600">📅 달력</button>
+                    <button data-tab="room1" class="tab-btn px-4 py-2 rounded-xl text-xs font-bold bg-gray-100 text-gray-600">1️⃣ 1번실</button>
+                    <button data-tab="room2" class="tab-btn px-4 py-2 rounded-xl text-xs font-bold bg-gray-100 text-gray-600">2️⃣ 2번실</button>
+                    <button data-tab="room3" class="tab-btn px-4 py-2 rounded-xl text-xs font-bold bg-gray-100 text-gray-600">3️⃣ 3번실</button>
+                </div>
+            </div>
+
+            <!-- 목록 뷰 -->
+            <div id="view-list" class="bg-white rounded-2xl shadow-sm overflow-hidden">
+                <div class="p-4 border-b border-gray-100">
+                    <h2 class="font-black text-gray-800">전체 예약 목록</h2>
+                </div>
+                <div id="listContent" class="divide-y divide-gray-100">
+                    <div class="p-8 text-center text-gray-400 text-sm">로딩 중...</div>
+                </div>
+            </div>
+
+            <!-- 달력 뷰 -->
+            <div id="view-calendar" class="bg-white rounded-2xl shadow-sm overflow-hidden hidden">
+                <div class="p-4 border-b border-gray-100 flex justify-between items-center">
+                    <button id="prevMonth" class="px-3 py-1 rounded-lg hover:bg-gray-100">◀</button>
+                    <h2 id="calMonthLabel" class="font-black text-gray-800">2026년 4월</h2>
+                    <button id="nextMonth" class="px-3 py-1 rounded-lg hover:bg-gray-100">▶</button>
+                </div>
+                <div class="grid grid-cols-7 bg-gray-50 text-center text-[10px] font-bold text-gray-500 uppercase">
+                    <div class="p-2 text-red-500">일</div>
+                    <div class="p-2">월</div><div class="p-2">화</div><div class="p-2">수</div>
+                    <div class="p-2">목</div><div class="p-2">금</div>
+                    <div class="p-2 text-blue-500">토</div>
+                </div>
+                <div id="calendarGrid" class="grid grid-cols-7"></div>
+            </div>
+
+            <!-- 상담실별 뷰 -->
+            <div id="view-room" class="bg-white rounded-2xl shadow-sm overflow-hidden hidden">
+                <div class="p-4 border-b border-gray-100">
+                    <h2 id="roomViewTitle" class="font-black text-gray-800">1번실 예약</h2>
+                </div>
+                <div id="roomContent" class="divide-y divide-gray-100">
+                    <div class="p-8 text-center text-gray-400 text-sm">로딩 중...</div>
+                </div>
+            </div>
+
+            <!-- 선택한 날짜의 예약 (달력에서 클릭 시) -->
+            <div id="dayDetail" class="bg-white rounded-2xl shadow-sm overflow-hidden hidden">
+                <div class="p-4 border-b border-gray-100 flex justify-between items-center">
+                    <h2 id="dayDetailTitle" class="font-black text-gray-800"></h2>
+                    <button id="closeDayDetail" class="text-gray-400 hover:text-gray-600">✕</button>
+                </div>
+                <div id="dayDetailContent" class="divide-y divide-gray-100"></div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- ============================================================
+         스크립트
+         ============================================================ -->
+    <script type="module">
+        // ⚠️⚠️⚠️ 여기 3개를 본인 값으로 바꾸세요! ⚠️⚠️⚠️
+        const SUPABASE_URL = 'https://cxfnpbwigylhrrtjhcuu.supabase.co';
+        const SUPABASE_KEY = 'sb_publishable_ONqYQtk_GBlxGJKTolJWTw_ryj1D554';
+        const ADMIN_PIN = '7942'; 
+        // ⚠️⚠️⚠️ 위 3개만 바꾸면 됩니다 ⚠️⚠️⚠️
+
+        // ===== 비밀번호 로직 =====
+        const loginScreen = document.getElementById('loginScreen');
+        const adminScreen = document.getElementById('adminScreen');
+        const pinInput = document.getElementById('pinInput');
+        const loginBtn = document.getElementById('loginBtn');
+        const loginError = document.getElementById('loginError');
+
+        // 세션 저장 (브라우저 닫기 전까지 유지)
+        if (sessionStorage.getItem('admin_logged_in') === 'true') {
+            loginScreen.classList.add('hidden');
+            adminScreen.classList.remove('hidden');
+            initAdmin();
+        }
+
+        function tryLogin() {
+            if (pinInput.value === ADMIN_PIN) {
+                sessionStorage.setItem('admin_logged_in', 'true');
+                loginScreen.classList.add('hidden');
+                adminScreen.classList.remove('hidden');
+                loginError.classList.add('hidden');
+                initAdmin();
+            } else {
+                loginError.classList.remove('hidden');
+                pinInput.value = '';
+                pinInput.focus();
+            }
+        }
+
+        loginBtn.addEventListener('click', tryLogin);
+        pinInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') tryLogin();
+        });
+        pinInput.focus();
+
+        document.getElementById('logoutBtn').addEventListener('click', () => {
+            sessionStorage.removeItem('admin_logged_in');
+            location.reload();
+        });
+
+        // ===== Supabase 연결 =====
+        let supabase;
+        let allReservations = [];
+        let currentTab = 'list';
+        let currentMonth = new Date();
+
+        async function initAdmin() {
+            try {
+                const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
+                supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+                
+                await loadAll();
+                
+                // 실시간 구독
+                supabase.channel('admin-changes')
+                    .on('postgres_changes', 
+                        { event: '*', schema: 'public', table: 'reservations' },
+                        () => loadAll()
+                    )
+                    .subscribe();
+                    
+            } catch (e) {
+                console.error('연결 실패:', e);
+                document.getElementById('connStatus').textContent = '●OFFLINE';
+                document.getElementById('connStatus').className = 'text-[10px] bg-red-500 px-2 py-1 rounded-full font-bold';
+                alert('Supabase 연결 실패. URL과 KEY를 확인하세요.');
+            }
+        }
+
+        // ===== 데이터 로드 =====
+        async function loadAll() {
+            const { data, error } = await supabase
+                .from('reservations')
+                .select('*')
+                .order('time', { ascending: true });
+            
+            if (error) {
+                console.error(error);
+                return;
+            }
+            allReservations = data || [];
+            updateSummary();
+            renderCurrentTab();
+        }
+
+        // ===== 요약 카운트 =====
+        function updateSummary() {
+            document.getElementById('totalCount').textContent = allReservations.length;
+            document.getElementById('room1Count').textContent = allReservations.filter(r => r.room === 1).length;
+            document.getElementById('room2Count').textContent = allReservations.filter(r => r.room === 2).length;
+            document.getElementById('room3Count').textContent = allReservations.filter(r => r.room === 3).length;
+        }
+
+        // ===== 검색 =====
+        function getFiltered() {
+            const q = document.getElementById('searchInput').value.trim().toLowerCase();
+            if (!q) return allReservations;
+            return allReservations.filter(r => 
+                (r.name || '').toLowerCase().includes(q) ||
+                (r.time || '').includes(q)
+            );
+        }
+
+        document.getElementById('searchInput').addEventListener('input', renderCurrentTab);
+        document.getElementById('refreshBtn').addEventListener('click', loadAll);
+
+        // ===== 탭 전환 =====
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('tab-active'));
+                btn.classList.add('tab-active');
+                currentTab = btn.dataset.tab;
+                renderCurrentTab();
+            });
+        });
+
+        function renderCurrentTab() {
+            // 모든 뷰 숨기기
+            document.getElementById('view-list').classList.add('hidden');
+            document.getElementById('view-calendar').classList.add('hidden');
+            document.getElementById('view-room').classList.add('hidden');
+            document.getElementById('dayDetail').classList.add('hidden');
+
+            if (currentTab === 'list') {
+                document.getElementById('view-list').classList.remove('hidden');
+                renderList();
+            } else if (currentTab === 'calendar') {
+                document.getElementById('view-calendar').classList.remove('hidden');
+                renderCalendar();
+            } else if (currentTab.startsWith('room')) {
+                document.getElementById('view-room').classList.remove('hidden');
+                renderRoomView(parseInt(currentTab.replace('room', '')));
+            }
+        }
+
+        // ===== 목록 뷰 =====
+        function renderList() {
+            const items = getFiltered();
+            const container = document.getElementById('listContent');
+            
+            if (items.length === 0) {
+                container.innerHTML = '<div class="p-8 text-center text-gray-400 text-sm">예약이 없습니다.</div>';
+                return;
+            }
+            
+            container.innerHTML = items.map(r => renderItem(r)).join('');
+            attachDeleteHandlers();
+        }
+
+        // ===== 상담실별 뷰 =====
+        function renderRoomView(roomNum) {
+            document.getElementById('roomViewTitle').textContent = `${roomNum}번실 예약`;
+            const items = getFiltered().filter(r => r.room === roomNum);
+            const container = document.getElementById('roomContent');
+            
+            if (items.length === 0) {
+                container.innerHTML = `<div class="p-8 text-center text-gray-400 text-sm">${roomNum}번실 예약이 없습니다.</div>`;
+                return;
+            }
+            
+            container.innerHTML = items.map(r => renderItem(r)).join('');
+            attachDeleteHandlers();
+        }
+
+        // ===== 예약 항목 렌더 =====
+        function renderItem(r) {
+            const roomClass = `room${r.room}-bg`;
+            const roomColors = {
+                1: 'bg-blue-100 text-blue-700',
+                2: 'bg-green-100 text-green-700',
+                3: 'bg-orange-100 text-orange-700'
+            };
+            return `
+                <div class="${roomClass} p-4 flex justify-between items-center">
+                    <div class="flex-1">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="text-[10px] font-black px-2 py-0.5 rounded-full ${roomColors[r.room]}">${r.room}번실</span>
+                            <span class="font-bold text-gray-800">${escapeHtml(r.name)}</span>
+                        </div>
+                        <p class="text-xs text-gray-600 font-medium">📅 ${escapeHtml(r.time)}</p>
+                    </div>
+                    <button data-id="${r.id}" class="del-btn text-gray-400 hover:text-red-500 p-2 transition">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    </button>
+                </div>
+            `;
+        }
+
+        function attachDeleteHandlers() {
+            document.querySelectorAll('.del-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const id = parseInt(btn.dataset.id);
+                    if (!confirm('이 예약을 삭제하시겠습니까?')) return;
+                    
+                    const { error } = await supabase.from('reservations').delete().eq('id', id);
+                    if (error) {
+                        alert('삭제 실패: ' + error.message);
+                    } else {
+                        await loadAll();
+                    }
+                });
+            });
+        }
+
+        // ===== 달력 뷰 =====
+        document.getElementById('prevMonth').addEventListener('click', () => {
+            currentMonth.setMonth(currentMonth.getMonth() - 1);
+            renderCalendar();
+        });
+        document.getElementById('nextMonth').addEventListener('click', () => {
+            currentMonth.setMonth(currentMonth.getMonth() + 1);
+            renderCalendar();
+        });
+        document.getElementById('closeDayDetail').addEventListener('click', () => {
+            document.getElementById('dayDetail').classList.add('hidden');
+        });
+
+        function renderCalendar() {
+            const year = currentMonth.getFullYear();
+            const month = currentMonth.getMonth();
+            
+            document.getElementById('calMonthLabel').textContent = `${year}년 ${month + 1}월`;
+            
+            const firstDay = new Date(year, month, 1);
+            const lastDay = new Date(year, month + 1, 0);
+            const startDayOfWeek = firstDay.getDay();
+            const daysInMonth = lastDay.getDate();
+            
+            // 해당 월 예약 그룹화
+            const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}-`;
+            const monthItems = getFiltered().filter(r => (r.time || '').startsWith(monthPrefix));
+            const byDay = {};
+            monthItems.forEach(r => {
+                const day = parseInt(r.time.substring(8, 10));
+                if (!byDay[day]) byDay[day] = [];
+                byDay[day].push(r);
+            });
+            
+            const grid = document.getElementById('calendarGrid');
+            let html = '';
+            
+            // 빈 칸 (월 시작 전)
+            for (let i = 0; i < startDayOfWeek; i++) {
+                html += '<div class="calendar-day border border-gray-100 bg-gray-50"></div>';
+            }
+            
+            // 날짜 칸
+            for (let d = 1; d <= daysInMonth; d++) {
+                const dayItems = byDay[d] || [];
+                const dayOfWeek = (startDayOfWeek + d - 1) % 7;
+                const dayColorClass = dayOfWeek === 0 ? 'text-red-500' : dayOfWeek === 6 ? 'text-blue-500' : 'text-gray-700';
+                
+                let badges = '';
+                const room1 = dayItems.filter(r => r.room === 1).length;
+                const room2 = dayItems.filter(r => r.room === 2).length;
+                const room3 = dayItems.filter(r => r.room === 3).length;
+                if (room1) badges += `<span class="inline-block bg-blue-500 text-white text-[9px] font-bold px-1 rounded mr-0.5">1:${room1}</span>`;
+                if (room2) badges += `<span class="inline-block bg-green-500 text-white text-[9px] font-bold px-1 rounded mr-0.5">2:${room2}</span>`;
+                if (room3) badges += `<span class="inline-block bg-orange-500 text-white text-[9px] font-bold px-1 rounded">3:${room3}</span>`;
+                
+                const cursorClass = dayItems.length > 0 ? 'cursor-pointer hover:bg-blue-50' : '';
+                html += `
+                    <div class="calendar-day border border-gray-100 p-1 ${cursorClass}" data-day="${d}">
+                        <div class="text-xs font-bold ${dayColorClass}">${d}</div>
+                        <div class="mt-1">${badges}</div>
+                    </div>
+                `;
+            }
+            
+            grid.innerHTML = html;
+            
+            // 날짜 클릭
+            grid.querySelectorAll('[data-day]').forEach(el => {
+                el.addEventListener('click', () => {
+                    const day = parseInt(el.dataset.day);
+                    showDayDetail(year, month, day);
+                });
+            });
+        }
+
+        function showDayDetail(year, month, day) {
+            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const items = allReservations.filter(r => (r.time || '').startsWith(dateStr));
+            
+            document.getElementById('dayDetailTitle').textContent = `${year}년 ${month + 1}월 ${day}일 예약`;
+            const container = document.getElementById('dayDetailContent');
+            
+            if (items.length === 0) {
+                container.innerHTML = '<div class="p-8 text-center text-gray-400 text-sm">이 날 예약이 없습니다.</div>';
+            } else {
+                items.sort((a, b) => a.time.localeCompare(b.time));
+                container.innerHTML = items.map(r => renderItem(r)).join('');
+                attachDeleteHandlers();
+            }
+            
+            document.getElementById('dayDetail').classList.remove('hidden');
+            document.getElementById('dayDetail').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // ===== 엑셀 다운로드 (CSV) =====
+        document.getElementById('excelBtn').addEventListener('click', () => {
+            const items = getFiltered();
+            if (items.length === 0) {
+                alert('내보낼 데이터가 없습니다.');
+                return;
+            }
+            
+            const headers = ['ID', '상담사', '상담실', '예약시간', '등록일시'];
+            const rows = items.map(r => [
+                r.id,
+                r.name,
+                `${r.room}번실`,
+                r.time,
+                r.created_at ? new Date(r.created_at).toLocaleString('ko-KR') : ''
+            ]);
+            
+            // BOM 추가 (한글 깨짐 방지)
+            const csv = '\uFEFF' + [headers, ...rows]
+                .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+                .join('\n');
+            
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const today = new Date().toISOString().substring(0, 10);
+            a.href = url;
+            a.download = `상담실예약_${today}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+
+        // ===== 유틸 =====
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+    </script>
+</body>
+</html>
