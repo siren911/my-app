@@ -1,308 +1,3 @@
-
-
-<!DOCTYPE html> <html lang="ko"> <head> <meta charset="UTF-8"> <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"> <title>상담실 실시간 예약 시스템</title> <script src="https://cdn.tailwindcss.com"></script> <style> @im
-
-pasted
-
-만들어 보려고 짜서 디터브에다가 올려놓은 파일들을 지금 전체를 압축한 거야 그걸 버스에 연동해 가지고 배포를 시켰는데 계속해서 상담실 선택이 잘 안 돼서 지금 너한테 대신 좀 부탁하려고 읽어봐서 뭐 어떤 원리 문제 때문에 안 되는지 니가 잘 코드 구조를 분석을 해보고 해결책을 좀 알려줘 코드위가 필요하면 새로 코드를 짜되 변형이 필요한 부분이 있으면 왜 어떤 이유 때문에 변형이 필요한지 나한테 좀 읽어줬으면 좋겠어 그래야지 내가 지금까지 했던 작업에 이어서 좀 이해를 할 수 있을 것 같거든 부탁해
-
-오후 1:36
-코드 분석해봤어요. 상담실 선택 버튼이 작동 안 되는 원인을 찾았는데, 한 가지가 아니라 두 가지 구조적 문제가 겹쳐 있어요. 하나씩 설명드릴게요.
-
-핵심 원인 1: type="module" 안에서 window.selectRoom 정의의 타이밍 문제
-지금 코드가 이런 구조예요:
-
-html
-<button id="room1" onclick="selectRoom(1)" ...>1번실</button>
-...
-<script type="module">
-    // Firebase import (네트워크에서 로드)
-    import { initializeApp } from "https://...";
-    import { getFirestore, ... } from "https://...";
-    
-    // ... 설정 코드 ...
-    
-    window.selectRoom = (num) => { ... };
-</script>
-여기서 두 가지가 동시에 작용해요:
-
-(1) type="module" 스크립트는 defer 속성이 자동으로 붙어요. 즉, HTML 파싱이 끝난 후에야 실행돼요. 그 전에 사용자가 버튼을 누르면 selectRoom이 아직 window에 등록되지 않은 상태라 "selectRoom is not defined" 에러가 나요.
-
-(2) 더 결정적인 문제는 Firebase import예요. import 구문은 네트워크에서 Firebase SDK를 다운로드해 와요. 이게 실패하거나 느리면, 그 아래에 있는 window.selectRoom = ... 줄까지 도달조차 못 해요. 모듈 스크립트는 import가 하나라도 실패하면 전체가 실행 중단되거든요.
-
-배포 환경에서 Firebase CDN 접근이 막혀있거나, __firebase_config 변수가 주입이 안 됐거나 (이게 제일 의심스러워요 — 외부 배포 환경에서는 이 변수가 자동 주입 안 돼요), 그러면 JSON.parse(__firebase_config)에서 에러 나면서 그 뒤 코드가 통째로 실행 안 돼요. 결과적으로 버튼 클릭이 무반응인 것처럼 보여요.
-
-핵심 원인 2: __firebase_config와 __app_id 의존성
-javascript
-const firebaseConfig = JSON.parse(__firebase_config);
-이 __firebase_config라는 변수는 특정 샌드박스 환경(Anthropic artifact 같은)에서만 자동으로 주입되는 변수예요. 본인이 자체 배포(GitHub Pages, Vercel, Netlify 등)했으면 이 변수가 없어요. 그러면:
-
-__firebase_config가 undefined
-JSON.parse(undefined) → 즉시 에러 발생, 모듈 스크립트 전체 중단
-window.selectRoom 정의되지 않음
-버튼 무반응
-해결책
-두 가지를 같이 고쳐야 해요:
-
-버튼 클릭 함수를 Firebase와 분리해서, Firebase가 죽어도 버튼은 동작하게
-Firebase 설정을 직접 하드코딩해서 환경 의존성 제거
-수정한 전체 코드 만들어드릴게요.
-
-
-파일 생성됨, 파일 읽음
-파일 생성됨, 파일 읽음
-변경한 부분과 그 이유 정리
-1. 스크립트를 두 개로 쪼갰어요
-
-기존: 모든 코드가 <script type="module"> 안에 있었음 → Firebase 한 줄이라도 실패하면 버튼 함수까지 죽음
-변경: UI 동작(버튼 선택)은 일반 <script>에, Firebase 통신은 <script type="module">에 → Firebase가 죽어도 버튼은 살아있음
-2. onclick="selectRoom(1)" 인라인 방식 제거, addEventListener로 변경
-
-인라인 onclick은 함수가 window 전역에 있어야 동작해요. type="module"은 기본적으로 변수가 모듈 스코프에 갇혀서, window.selectRoom = ...로 명시적으로 노출시켜야 했죠. 이게 타이밍 문제의 원인이었어요.
-addEventListener 방식은 같은 스크립트 안의 함수를 직접 참조하므로 window 전역화가 필요 없어요.
-3. __firebase_config 변수 의존성 제거
-
-이게 본인 환경에서 가장 결정적인 문제였을 가능성이 높아요. 이 변수는 Anthropic의 artifact 샌드박스 같은 특정 환경에서만 자동 주입되거든요. GitHub Pages, Vercel, Netlify 같은 일반 호스팅에서는 undefined라서 JSON.parse가 즉시 에러를 뱉고 모듈 전체가 멈춰요.
-변경: Firebase 설정을 객체로 직접 박아놨어요. 본인의 Firebase 콘솔에서 설정값을 가져와서 그 자리(여기에-API-키 부분)에 넣으셔야 동작해요.
-4. try-catch + 연결 상태 표시 추가
-
-우상단의 "Live Syncing" 표시가 이제 실제 연결 상태에 따라 색깔이 바뀌어요 (회색→초록색 또는 빨간색). Firebase 연결 실패 시 화면에 명확하게 표시돼서 디버깅하기 편해져요.
-본인이 해야 할 작업
-배포 전에 코드 안에 있는 firebaseConfig 객체에 본인 Firebase 프로젝트의 실제 설정값을 넣어주세요. Firebase 콘솔 → 프로젝트 설정 → 일반 → "내 앱" 섹션 하단에 SDK 설정 코드가 있어요. 거기서 apiKey, authDomain, projectId 등을 복사해서 그대로 붙여넣으면 돼요.
-
-이거 넣고 배포하시면 버튼도 잘 눌리고 예약도 정상적으로 저장될 거예요. 혹시 Firestore 보안 규칙(rules) 설정도 막혀있을 수 있는데, 그 부분에서 또 막히면 알려주세요.
-
-
-Reservation fixed
-코드 · HTML 
-무슨 말인지 하나도 모르겠어 나는 깃허브에 index.html을 만들었고 그걸 app으로 만들어서 배포했는데 그걸 참조해서 알려줘
-
-오후 1:38
-아, 죄송해요. 상황을 다시 정리해서 쉽게 설명드릴게요.
-
-지금 상황을 그림으로 그리면
-[GitHub에 올린 index.html]  →  [앱으로 배포]  →  [핸드폰/PC로 접속]
-                                                        ↓
-                                          상담실 버튼 눌러도 반응 없음 ❌
-왜 안 되는지 (진짜 쉽게)
-코드 안에 이런 줄이 있어요:
-
-javascript
-const firebaseConfig = JSON.parse(__firebase_config);
-여기서 __firebase_config라는 게 **"누군가 알아서 채워줄 빈칸"**이에요.
-
-Anthropic의 Claude artifact 같은 특정 미리보기 환경에서는 이 빈칸을 자동으로 채워줘요. 근데 GitHub에 올려서 일반 웹사이트로 배포하면 그 빈칸이 영원히 비어있어요. 채워줄 사람이 없거든요.
-
-빈칸이 비어있으니 그 줄에서 에러가 터져요. 그런데 자바스크립트가 한 번 에러가 터지면 그 아래에 있는 코드 전체가 실행이 멈춰요. 상담실 버튼을 누르면 동작해야 할 함수도 그 아래에 있어서, 같이 죽어버린 거예요. 그래서 버튼이 무반응인 거죠.
-
-해결하려면 본인이 할 일 두 가지
-1️⃣ Firebase 콘솔에서 본인 프로젝트 설정값 가져오기
-https://console.firebase.google.com 접속
-본인이 만든 프로젝트 클릭
-왼쪽 위 ⚙️(톱니바퀴) → 프로젝트 설정 클릭
-화면 아래로 스크롤하면 "내 앱" 이라는 섹션 있어요
-거기 보면 이런 코드가 보일 거예요:
-javascript
-const firebaseConfig = {
-  apiKey: "AIzaSyB...실제값...",
-  authDomain: "내프로젝트.firebaseapp.com",
-  projectId: "내프로젝트",
-  storageBucket: "내프로젝트.appspot.com",
-  messagingSenderId: "1234567890",
-  appId: "1:1234567890:web:abcdef..."
-};
-이거 통째로 복사하세요.
-
-2️⃣ GitHub의 index.html 수정
-제가 새로 만들어드린 파일에서 이 부분만 찾으세요:
-
-javascript
-const firebaseConfig = {
-    apiKey: "여기에-API-키",
-    authDomain: "프로젝트.firebaseapp.com",
-    ...
-};
-이걸 본인이 1번에서 복사한 진짜 값으로 그대로 덮어쓰기 하면 돼요.
-
-정리하면
-원래 코드의 문제: __firebase_config라는 빈칸이 비어있어서 코드 전체가 멈춤 → 버튼도 멈춤
-해결법: 빈칸 대신 본인 Firebase 설정값을 직접 코드에 박아넣기
-제가 드린 reservation_fixed.html 파일을 GitHub에 있는 index.html 자리에 덮어쓰기 하시고, 위에서 말한 Firebase 설정값만 본인 것으로 바꾸시면 돼요.
-
-혹시 Firebase 콘솔 들어가서 설정값 찾는 게 어려우시면 화면 캡처해서 보여주세요. 어디를 눌러야 하는지 짚어드릴게요.
-
-firebase에서 api 연결하면 돈나가는거 아니야? 나는 이걸 수주를 받아서 주는거라서 내돈이 들어가면 안되
-
-오후 1:42
-아 그 부분 걱정되시는 거 당연해요. 명확하게 알려드릴게요.
-
-결론부터 말하면: 무료로 충분히 가능해요
-Firebase에는 **Spark 요금제(무료)**라는 게 있어요. 신용카드 등록도 안 해도 되고, 자동으로 유료 전환되지도 않아요. 무료 한도를 넘으면 그냥 서비스가 일시 중단될 뿐, 청구서가 날아오지 않아요.
-
-상담실 예약 시스템 정도면 무료 한도 안에서 충분
-무료(Spark) 요금제 한도가 이래요:
-
-Firestore (예약 데이터 저장하는 DB)
-
-하루 읽기 50,000회
-하루 쓰기 20,000회
-하루 삭제 20,000회
-저장 용량 1GB
-Authentication (익명 로그인)
-
-무제한 무료
-상담실 예약 시스템이라면 하루에 직원들이 예약 등록 몇십 번, 화면 새로고침 몇백 번 하는 정도일 텐데, 5만 회 근처도 못 가요. 수년간 써도 무료 한도 안에서 돌아가요.
-
-단, 주의할 점 두 가지
-1. 실수로 "Blaze 요금제(유료)"로 업그레이드하지 마세요
-
-Firebase 콘솔에서 "업그레이드" 버튼이 보여도 절대 누르지 마세요
-Spark(무료)로 그냥 두시면 돈 나갈 일 없어요
-2. 보안 규칙(Rules)을 꼭 설정하세요
-
-만약 누군가 악의적으로 외부에서 자동화된 요청을 마구 보내면 무료 한도가 빨리 소진될 수 있어요
-Firestore 규칙에서 로그인한 사용자만 읽기/쓰기 가능하도록 막아두면 안전해요
-수주 받아서 납품하는 거라면 추가 조언
-API 키가 코드에 노출되는 게 보안상 괜찮은가?
-
-Firebase 클라이언트용 API 키는 공개되어도 괜찮게 설계되어 있어요. GitHub에 올라가도 문제 없어요.
-진짜 보안은 위에서 말한 **Firestore 보안 규칙(Rules)**으로 해요.
-단, Firebase 콘솔에서 승인된 도메인을 본인 GitHub Pages 주소로만 제한하면 더 안전해요. (Authentication → Settings → 승인된 도메인)
-클라이언트한테 인수인계할 때
-
-Firebase 프로젝트 자체를 클라이언트 계정으로 만들어 주거나, 본인 계정에서 만들었다면 나중에 클라이언트 계정으로 소유권 이전해주는 게 좋아요. 안 그러면 본인이 평생 관리해야 해요.
-진짜 결론
-상담실 예약 정도 규모면 무료로 평생 가능하고, 본인 돈 나갈 일 없어요. Spark 요금제로 시작하시고 절대 업그레이드 누르지만 않으시면 돼요.
-
-추가로 궁금한 거 있으세요? 예를 들면:
-
-Firebase 프로젝트 처음 만드는 법
-보안 규칙(Rules) 설정 방법
-클라이언트한테 넘길 때 소유권 이전하는 법
-말씀해 주시면 단계별로 알려드릴게요.
-
-그럼다시 가이드 줘
-
-오후 1:43
-네! 처음부터 끝까지 차근차근 알려드릴게요. 따라하시기만 하면 돼요.
-
-📋 전체 흐름
-1단계: Firebase 프로젝트 만들기 (10분)
-   ↓
-2단계: Firestore 데이터베이스 켜기 (3분)
-   ↓
-3단계: 익명 로그인 켜기 (2분)
-   ↓
-4단계: 설정값 복사하기 (2분)
-   ↓
-5단계: GitHub의 index.html 수정 (5분)
-   ↓
-6단계: 보안 규칙 설정 (3분)
-   ↓
-완료! ✅
-1️⃣단계: Firebase 프로젝트 만들기
-https://console.firebase.google.com 접속 (구글 계정 로그인)
-"프로젝트 만들기" 클릭
-프로젝트 이름 입력 (예: 상담실예약 또는 영어로 counseling-reservation)
-"이 프로젝트에 Google 애널리틱스 사용 설정" → 끄기 (필요 없어요)
-"프로젝트 만들기" 클릭 → 잠시 기다리면 완료
-2️⃣단계: Firestore 데이터베이스 켜기
-예약 데이터를 저장할 곳이에요.
-
-왼쪽 메뉴에서 "빌드" → "Firestore Database" 클릭
-"데이터베이스 만들기" 클릭
-위치 선택: asia-northeast3 (서울) 선택 → "다음"
-보안 규칙: 일단 "테스트 모드에서 시작" 선택 → "사용 설정"
-(나중에 6단계에서 보안 규칙 제대로 설정할 거예요)
-잠시 기다리면 데이터베이스 생성 완료
-3️⃣단계: 익명 로그인 켜기
-사용자가 로그인 없이도 예약할 수 있게 하는 기능이에요.
-
-왼쪽 메뉴에서 "빌드" → "Authentication" 클릭
-"시작하기" 클릭
-"Sign-in method" 탭 클릭
-제공업체 목록에서 "익명" 클릭
-"사용 설정" 토글을 켜고 "저장"
-4️⃣단계: Firebase 설정값 복사하기
-이제 본인 프로젝트의 "주소"를 가져올 차례예요.
-
-왼쪽 위 ⚙️(톱니바퀴) → "프로젝트 설정" 클릭
-화면 아래로 스크롤 → "내 앱" 섹션이 있어요
-</> 모양 아이콘 (웹) 클릭
-앱 닉네임 입력 (예: 예약앱) → "앱 등록" 클릭
-"Firebase Hosting도 설정"은 체크하지 마세요
-화면에 이런 코드가 나와요:
-javascript
-const firebaseConfig = {
-  apiKey: "AIzaSyB...",
-  authDomain: "xxx.firebaseapp.com",
-  projectId: "xxx",
-  storageBucket: "xxx.appspot.com",
-  messagingSenderId: "1234567890",
-  appId: "1:1234567890:web:abcdef..."
-};
-이 코드 전체를 복사하세요. (메모장에 붙여놓으세요)
-
-5️⃣단계: GitHub의 index.html 수정
-GitHub에서 본인 저장소(repository)로 들어가세요
-index.html 파일을 클릭하세요
-오른쪽 위 연필 모양(✏️) 아이콘 클릭 (편집 모드)
-기존 내용을 전부 지우고, 제가 드린 reservation_fixed.html 내용을 통째로 붙여넣으세요
-붙여넣은 코드 안에서 이 부분을 찾으세요:
-javascript
-const firebaseConfig = {
-    apiKey: "여기에-API-키",
-    authDomain: "프로젝트.firebaseapp.com",
-    projectId: "프로젝트-ID",
-    storageBucket: "프로젝트.appspot.com",
-    messagingSenderId: "발신자-ID",
-    appId: "앱-ID"
-};
-이 부분을 4단계에서 복사한 본인 설정값으로 통째로 교체하세요
-화면 아래로 내려서 "Commit changes" 클릭
-6️⃣단계: 보안 규칙 설정 (중요!)
-테스트 모드는 30일 후 자동으로 막혀요. 그리고 보안상 꼭 제대로 설정해야 해요.
-
-Firebase 콘솔로 돌아가서 "Firestore Database" 클릭
-위쪽 탭에서 "규칙(Rules)" 클릭
-기존 내용을 전부 지우고 아래 내용으로 교체:
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /artifacts/{appId}/public/data/reservations/{document} {
-      allow read, write: if request.auth != null;
-    }
-  }
-}
-"게시" 클릭
-이 규칙의 의미: 로그인한 사용자(우리 앱에 접속한 사람)만 예약을 읽고 쓸 수 있다. 외부에서 무단으로 데이터를 건드리지 못해요.
-
-✅ 완료! 테스트해보기
-본인이 배포한 앱 주소로 접속
-우상단 표시등이 초록색 "Live Syncing" 으로 바뀌면 성공
-이름 입력 → 상담실 선택 → 시간 선택 → 예약 등록
-아래 목록에 예약이 뜨면 완벽하게 작동하는 거예요
-🔐 추가 보안 (선택사항, 권장)
-본인 앱 도메인에서만 작동하도록 제한하면 더 안전해요.
-
-Firebase 콘솔 → "Authentication" → 위쪽 "Settings" 탭
-"승인된 도메인" 섹션
-본인의 GitHub Pages 주소 추가 (예: xxx.github.io)
-localhost만 남기고 나머지는 삭제 가능
-⚠️ 절대 하면 안 되는 것
-Firebase 콘솔에 "Blaze 요금제로 업그레이드" 버튼이 보여도 절대 누르지 마세요
-그냥 무시하시면 평생 무료예요
-진행하시다가 막히는 단계가 있으면 "몇 단계에서 막혔다" 라고 알려주세요. 화면 캡처도 같이 보내주시면 더 정확히 도와드릴 수 있어요. 천천히 하나씩 따라해보세요!
-
-
-
-
-
-
-Claude는 AI이며 실수할 수 있습니다. 응답을 다시 한번 확인해 주세요.
-Reservation fixed · HTML
-복사
-
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -323,11 +18,11 @@ Reservation fixed · HTML
             <h1 class="text-2xl font-black tracking-tight italic">상담실 예약현황</h1>
             <p class="text-blue-100 text-[10px] mt-1 font-bold opacity-80 uppercase tracking-widest">Real-time Booking System</p>
         </header>
- 
+
         <div class="p-6 space-y-6">
             <div class="space-y-1">
                 <label class="text-[11px] font-bold text-gray-400 ml-1 uppercase font-mono">Counselor Name</label>
-                <input type="text" id="userName" placeholder="성함을 입력하세요" class="w-full p-4 bg-gray-50 rounded-2xl border-none outline-none focus:ring-2 focus:ring-blue-500 font-medium transition-all text-gray-800">
+                <input type="text" id="userName" placeholder="성함을 입력하세요" maxlength="20" class="w-full p-4 bg-gray-50 rounded-2xl border-none outline-none focus:ring-2 focus:ring-blue-500 font-medium transition-all text-gray-800">
             </div>
             
             <div class="space-y-1">
@@ -338,17 +33,17 @@ Reservation fixed · HTML
                     <button id="room3" data-room="3" class="room-btn py-4 bg-gray-100 rounded-2xl text-gray-600 font-bold text-sm hover:bg-gray-200">3번실</button>
                 </div>
             </div>
- 
+
             <div class="space-y-1">
                 <label class="text-[11px] font-bold text-gray-400 ml-1 uppercase font-mono">Reservation Time</label>
                 <input type="datetime-local" id="bookTime" class="w-full p-4 bg-gray-50 rounded-2xl border-none outline-none focus:ring-2 focus:ring-blue-500 font-medium transition-all text-gray-800">
             </div>
- 
+
             <button id="submitBtn" class="w-full bg-blue-600 text-white font-black py-5 rounded-2xl shadow-xl hover:bg-blue-700 active:scale-95 transition-all text-lg mt-2">
                 예약 등록하기
             </button>
         </div>
- 
+
         <div class="flex-1 bg-gray-50 px-6 py-8 rounded-t-[2.5rem] border-t border-gray-100">
             <div class="flex justify-between items-center mb-6 px-1">
                 <h2 class="font-black text-gray-800 text-lg">전체 예약 현황</h2>
@@ -365,15 +60,13 @@ Reservation fixed · HTML
             </div>
         </div>
     </div>
- 
+
     <!-- ============================================================
-         [수정 1] UI 동작 스크립트를 Firebase와 분리
-         일반 <script>로 작성 → 즉시 실행됨 → 버튼 항상 동작
+         UI 동작 (버튼 클릭) - Supabase와 무관하게 항상 동작
          ============================================================ -->
     <script>
         let selectedRoomId = null;
- 
-        // 상담실 선택 (Firebase와 무관하게 항상 동작)
+
         function selectRoom(num) {
             selectedRoomId = num;
             document.querySelectorAll('.room-btn').forEach(btn => {
@@ -382,15 +75,14 @@ Reservation fixed · HTML
             const target = document.getElementById('room' + num);
             if (target) target.classList.add('active-room');
         }
- 
-        // 버튼에 이벤트 리스너 부착 (onclick 인라인 대신 사용)
+
         document.addEventListener('DOMContentLoaded', () => {
             document.querySelectorAll('.room-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
                     selectRoom(parseInt(btn.dataset.room));
                 });
             });
- 
+
             document.getElementById('submitBtn').addEventListener('click', () => {
                 if (window.handleAddReservation) {
                     window.handleAddReservation();
@@ -400,123 +92,144 @@ Reservation fixed · HTML
             });
         });
     </script>
- 
+
     <!-- ============================================================
-         [수정 2] Firebase 스크립트 - 설정을 직접 하드코딩
-         try-catch로 감싸서 실패해도 UI는 살아남게 함
+         Supabase 연결 - 본인의 URL과 KEY 입력 필요!
          ============================================================ -->
     <script type="module">
         try {
-            const { initializeApp } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-            const { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-            const { getAuth, signInAnonymously, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
- 
-            // ⚠️ 여기에 본인의 Firebase 프로젝트 설정을 직접 입력하세요
-            // Firebase 콘솔 → 프로젝트 설정 → 일반 → 내 앱 → SDK 설정 및 구성
-            const firebaseConfig = {
-                apiKey: "여기에-API-키",
-                authDomain: "프로젝트.firebaseapp.com",
-                projectId: "프로젝트-ID",
-                storageBucket: "프로젝트.appspot.com",
-                messagingSenderId: "발신자-ID",
-                appId: "앱-ID"
-            };
-            const appId = 'counseling-reservation';
- 
-            const app = initializeApp(firebaseConfig);
-            const db = getFirestore(app);
-            const auth = getAuth(app);
- 
-            let currentUser = null;
- 
-            // 예약 등록 함수
-            window.handleAddReservation = async () => {
-                if (!currentUser) {
-                    alert('잠시만 기다려 주세요. 서버와 연결 중입니다.');
+            const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
+
+            // ⚠️⚠️⚠️ 여기 두 줄을 본인 값으로 바꾸세요! ⚠️⚠️⚠️
+            const SUPABASE_URL = 'https://cxfnpbwigylhrrtjhcuu.supabase.co';
+            const SUPABASE_KEY = 'sb_publishable_ONqYQt...(긴 문자열 전체)';
+            // ⚠️⚠️⚠️ 위 두 줄만 바꾸면 됩니다 ⚠️⚠️⚠️
+
+
+            const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+            // 화면 렌더링 함수
+            function renderList(items) {
+                const listDiv = document.getElementById('reservationList');
+                if (!items || items.length === 0) {
+                    listDiv.innerHTML = '<p class="text-gray-400 text-center py-10 font-medium">현재 예약이 없습니다.</p>';
                     return;
                 }
+                items.sort((a, b) => a.time.localeCompare(b.time));
+                listDiv.innerHTML = items.map(r => `
+                    <div class="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                        <div class="flex-1">
+                            <div class="flex items-center gap-2">
+                                <span class="text-[9px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">${r.room}번실</span>
+                                <span class="font-bold text-gray-800 text-sm">${escapeHtml(r.name)} 상담사</span>
+                            </div>
+                            <p class="text-[11px] text-gray-400 mt-1 font-medium italic">${escapeHtml(r.time)}</p>
+                        </div>
+                        <button onclick="deleteReservation(${r.id})" class="text-gray-200 hover:text-red-400 p-2 transition-colors">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        </button>
+                    </div>
+                `).join('');
+            }
+
+            // XSS 방어용 HTML 이스케이프
+            function escapeHtml(str) {
+                if (!str) return '';
+                return String(str)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#039;');
+            }
+
+            // 데이터 가져오기
+            async function loadReservations() {
+                const { data, error } = await supabase
+                    .from('reservations')
+                    .select('*')
+                    .order('time', { ascending: true });
+                
+                if (error) {
+                    console.error('데이터 로드 실패:', error);
+                    return;
+                }
+                renderList(data);
+            }
+
+            // 예약 등록
+            window.handleAddReservation = async () => {
                 const name = document.getElementById('userName').value.trim();
                 const time = document.getElementById('bookTime').value;
- 
+
                 if (!name || !selectedRoomId || !time) {
                     alert('이름, 상담실, 시간을 모두 입력해 주세요.');
                     return;
                 }
- 
-                try {
-                    const colPath = collection(db, 'artifacts', appId, 'public', 'data', 'reservations');
-                    await addDoc(colPath, {
-                        name,
+
+                const { error } = await supabase
+                    .from('reservations')
+                    .insert([{
+                        name: name,
                         room: selectedRoomId,
                         time: time.replace('T', ' '),
-                        createdAt: Date.now()
-                    });
-                    alert('예약이 완료되었습니다!');
-                    document.getElementById('userName').value = '';
-                    document.getElementById('bookTime').value = '';
-                    selectedRoomId = null;
-                    document.querySelectorAll('.room-btn').forEach(btn => btn.classList.remove('active-room'));
-                } catch (e) {
-                    console.error(e);
-                    alert('저장 중 오류가 발생했습니다: ' + e.message);
+                        created_at_ms: Date.now()
+                    }]);
+
+                if (error) {
+                    console.error('등록 실패:', error);
+                    alert('저장 중 오류가 발생했습니다: ' + error.message);
+                    return;
                 }
+
+                alert('예약이 완료되었습니다!');
+                document.getElementById('userName').value = '';
+                document.getElementById('bookTime').value = '';
+                selectedRoomId = null;
+                document.querySelectorAll('.room-btn').forEach(btn => btn.classList.remove('active-room'));
             };
- 
-            // 예약 삭제 함수
+
+            // 예약 삭제
             window.deleteReservation = async (id) => {
                 if (!confirm('예약을 취소하시겠습니까?')) return;
-                try {
-                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reservations', id));
-                } catch (e) {
+                
+                const { error } = await supabase
+                    .from('reservations')
+                    .delete()
+                    .eq('id', id);
+                
+                if (error) {
+                    console.error('삭제 실패:', error);
                     alert('삭제 중 오류가 발생했습니다.');
                 }
             };
- 
-            // 익명 로그인 + 실시간 구독
-            await signInAnonymously(auth);
-            onAuthStateChanged(auth, (user) => {
-                currentUser = user;
-                if (user) {
-                    document.getElementById('statusDot').className = 'w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse';
-                    document.getElementById('statusText').textContent = 'Live Syncing';
- 
-                    const colPath = collection(db, 'artifacts', appId, 'public', 'data', 'reservations');
-                    onSnapshot(colPath, (snapshot) => {
-                        const listDiv = document.getElementById('reservationList');
-                        let items = [];
-                        snapshot.forEach(d => items.push({ id: d.id, ...d.data() }));
-                        items.sort((a, b) => a.time.localeCompare(b.time));
- 
-                        if (items.length === 0) {
-                            listDiv.innerHTML = '<p class="text-gray-400 text-center py-10 font-medium">현재 예약이 없습니다.</p>';
-                            return;
-                        }
- 
-                        listDiv.innerHTML = items.map(r => `
-                            <div class="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-                                <div class="flex-1">
-                                    <div class="flex items-center gap-2">
-                                        <span class="text-[9px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">${r.room}번실</span>
-                                        <span class="font-bold text-gray-800 text-sm">${r.name} 상담사</span>
-                                    </div>
-                                    <p class="text-[11px] text-gray-400 mt-1 font-medium italic">${r.time}</p>
-                                </div>
-                                <button onclick="deleteReservation('${r.id}')" class="text-gray-200 hover:text-red-400 p-2 transition-colors">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                </button>
-                            </div>
-                        `).join('');
-                    });
-                }
-            });
+
+            // 연결 상태 표시
+            document.getElementById('statusDot').className = 'w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse';
+            document.getElementById('statusText').textContent = 'Live Syncing';
+
+            // 초기 데이터 로드
+            await loadReservations();
+
+            // 실시간 구독 (Realtime)
+            supabase
+                .channel('reservations-changes')
+                .on('postgres_changes', 
+                    { event: '*', schema: 'public', table: 'reservations' },
+                    (payload) => {
+                        console.log('변경 감지:', payload);
+                        loadReservations();
+                    }
+                )
+                .subscribe();
+
         } catch (e) {
-            console.error("Firebase 초기화 실패:", e);
+            console.error("Supabase 초기화 실패:", e);
             document.getElementById('statusDot').className = 'w-2.5 h-2.5 bg-red-500 rounded-full';
             document.getElementById('statusText').textContent = 'Connection Failed';
             document.getElementById('reservationList').innerHTML = 
-                '<p class="text-red-400 text-center py-10 font-medium text-xs">서버 연결 실패<br>Firebase 설정을 확인해 주세요.</p>';
+                '<p class="text-red-400 text-center py-10 font-medium text-xs">서버 연결 실패<br>Supabase 설정을 확인해 주세요.</p>';
         }
     </script>
 </body>
 </html>
- 
