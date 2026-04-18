@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>상담실 실시간 예약 시스템</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+
+        // 환경 설정 (데이터베이스 연결용)
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'counseling-app';
+        
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        let selectedRoom = null;
+        let currentUser = null;
+
+        // 1. 로그인 초기화
+        const initAuth = async () => {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        currentUser = user;
+                        startRealtimeSync();
+                    }
+                });
+            } catch (error) {
+                console.error("인증 실패:", error);
+            }
+        };
+
+        // 2. 상담실 선택 효과
+        window.selectRoom = (num) => {
+            selectedRoom = num;
+            document.querySelectorAll('.room-btn').forEach(btn => {
+                btn.classList.remove('bg-blue-600', 'text-white', 'shadow-md');
+                btn.classList.add('bg-gray-100', 'text-gray-600');
+            });
+            const target = document.getElementById(`room${num}`);
+            target.classList.add('bg-blue-600', 'text-white', 'shadow-md');
+            target.classList.remove('bg-gray-100', 'text-gray-600');
+        };
+
+        // 3. 예약 추가 (공용 데이터베이스에 저장)
+        window.addReservation = async () => {
+            const name = document.getElementById('userName').value.trim();
+            const time = document.getElementById('bookTime').value;
+
+            if (!name || !selectedRoom || !time) {
+                alert('이름, 상담실, 시간을 모두 선택해 주세요!');
+                return;
+            }
+
+            try {
+                const dataPath = collection(db, 'artifacts', appId, 'public', 'data', 'reservations');
+                await addDoc(dataPath, {
+                    name,
+                    room: selectedRoom,
+                    time: time.replace('T', ' '),
+                    createdAt: Date.now(),
+                    userId: currentUser.uid
+                });
+                
+                document.getElementById('userName').value = '';
+                document.getElementById('bookTime').value = '';
+                alert('예약이 성공적으로 등록되었습니다.');
+            } catch (e) {
+                alert('저장 실패: 권한을 확인하세요.');
+            }
+        };
+
+        // 4. 예약 삭제
+        window.deleteReservation = async (id) => {
+            if (!confirm('예약을 취소하시겠습니까?')) return;
+            try {
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reservations', id));
+            } catch (e) {
+                alert('삭제 권한이 없습니다.');
+            }
+        };
+
+        // 5. 실시간 동기화 (50명이 동시에 보는 화면)
+        const startRealtimeSync = () => {
+            const dataPath = collection(db, 'artifacts', appId, 'public', 'data', 'reservations');
+            onSnapshot(dataPath, (snapshot) => {
+                const listDiv = document.getElementById('reservationList');
+                let items = [];
+                snapshot.forEach(doc => items.push({ id: doc.id, ...doc.data() }));
+
+                // 시간순 정렬
+                items.sort((a, b) => a.time.localeCompare(b.time));
+
+                if (items.length === 0) {
+                    listDiv.innerHTML = '<p class="text-gray-400 text-center py-10">등록된 예약이 없습니다.</p>';
+                    return;
+                }
+
+                listDiv.innerHTML = items.map(r => `
+                    <div class="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mb-3">
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <span class="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full">${r.room}번실</span>
+                                <span class="font-bold text-gray-800">${r.name} 상담사</span>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1">${r.time}</p>
+                        </div>
+                        <button onclick="deleteReservation('${r.id}')" class="text-gray-300 hover:text-red-500 transition-colors p-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        </button>
+                    </div>
+                `).join('');
+            });
+        };
+
+        window.onload = initAuth;
+    </script>
+    <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+        body { font-family: 'Pretendard', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .room-btn { transition: all 0.2s; }
+    </style>
+</head>
+<body class="bg-[#F8F9FB] min-h-screen p-4 flex flex-col items-center">
+    <div class="w-full max-w-md bg-white rounded-[2.5rem] shadow-2xl overflow-hidden min-h-[90vh] flex flex-col">
+        <!-- 상단 헤더 -->
+        <header class="bg-blue-600 p-8 text-white text-center rounded-b-[2.5rem]">
+            <h1 class="text-2xl font-black">상담실 예약현황</h1>
+            <p class="text-blue-100 text-[10px] mt-1 font-bold opacity-80 tracking-widest uppercase">Real-time Booking System</p>
+        </header>
+
+        <!-- 예약 입력 -->
+        <div class="p-6 space-y-6">
+            <div class="space-y-1">
+                <label class="text-[10px] font-bold text-gray-400 ml-1">상담원 성함</label>
+                <input type="text" id="userName" placeholder="이름을 입력하세요" class="w-full p-4 bg-gray-50 rounded-2xl border-none outline-none focus:ring-2 focus:ring-blue-500 font-medium">
+            </div>
+            
+            <div class="space-y-1">
+                <label class="text-[10px] font-bold text-gray-400 ml-1">상담실 선택</label>
+                <div class="grid grid-cols-3 gap-3">
+                    <button id="room1" onclick="selectRoom(1)" class="room-btn py-4 bg-gray-100 rounded-2xl text-gray-600 font-bold">1번실</button>
+                    <button id="room2" onclick="selectRoom(2)" class="room-btn py-4 bg-gray-100 rounded-2xl text-gray-600 font-bold">2번실</button>
+                    <button id="room3" onclick="selectRoom(3)" class="room-btn py-4 bg-gray-100 rounded-2xl text-gray-600 font-bold">3번실</button>
+                </div>
+            </div>
+
+            <div class="space-y-1">
+                <label class="text-[10px] font-bold text-gray-400 ml-1">예약 희망 시간</label>
+                <input type="datetime-local" id="bookTime" class="w-full p-4 bg-gray-50 rounded-2xl border-none outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+
+            <button onclick="addReservation()" class="w-full bg-blue-600 text-white font-black py-5 rounded-2xl shadow-xl hover:bg-blue-700 active:scale-95 transition-all text-lg">
+                지금 예약하기
+            </button>
+        </div>
+
+        <!-- 예약 리스트 -->
+        <div class="flex-1 bg-gray-50 px-6 py-8 rounded-t-[2.5rem]">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="font-black text-gray-800 text-lg">전체 예약 내역</h2>
+                <div class="flex items-center gap-1.5">
+                    <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                    <span class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Live Sync</span>
+                </div>
+            </div>
+            <div id="reservationList">
+                <p class="text-center py-10 text-gray-300 text-xs">서버에 연결 중입니다...</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
